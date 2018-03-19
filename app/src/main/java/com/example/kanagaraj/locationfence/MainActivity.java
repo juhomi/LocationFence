@@ -125,8 +125,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupFences() {
-        // DetectedActivityFence will fire when it detects the user performing the specified
-        // activity.  In this case it's walking.
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return;
         }
