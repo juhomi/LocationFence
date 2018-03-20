@@ -23,18 +23,24 @@ import android.view.MenuItem;
 import android.widget.Toast;
 
 import com.google.android.gms.awareness.Awareness;
+import com.google.android.gms.awareness.SnapshotClient;
 import com.google.android.gms.awareness.fence.AwarenessFence;
+import com.google.android.gms.awareness.fence.DetectedActivityFence;
 import com.google.android.gms.awareness.fence.FenceState;
 import com.google.android.gms.awareness.fence.FenceUpdateRequest;
+import com.google.android.gms.awareness.fence.HeadphoneFence;
 import com.google.android.gms.awareness.fence.LocationFence;
 import com.google.android.gms.awareness.snapshot.LocationResponse;
+import com.google.android.gms.awareness.state.HeadphoneState;
+import com.google.android.gms.location.DetectedActivity;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 
 public class MainActivity extends AppCompatActivity {
 
     // The fence key is how callback code determines which fence fired.
-    private final String FENCE_KEY = "fence_key";
+    private final String MOVIING_FENCE_KEY = "moving_fence_key";
+    private final String IDLE_FENCE_KEY = "idle_fence_key";
 
     private final String TAG = getClass().getSimpleName();
 
@@ -42,14 +48,9 @@ public class MainActivity extends AppCompatActivity {
 
     private FenceReceiver mFenceReceiver;
 
-    private final String LOG_TAG = MainActivity.class.getSimpleName();
-
     // The intent action which will be fired when your fence is triggered.
     private final String FENCE_RECEIVER_ACTION =
             BuildConfig.APPLICATION_ID + "FENCE_RECEIVER_ACTION";
-
-
-    private static final int MY_PERMISSION_LOCATION = 1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,7 +85,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         // Unregister the fence:
         Awareness.getFenceClient(this).updateFences(new FenceUpdateRequest.Builder()
-                .removeFence(FENCE_KEY)
+                .removeFence(MOVIING_FENCE_KEY)
+                .removeFence(IDLE_FENCE_KEY)
                 .build())
                 .addOnSuccessListener(new OnSuccessListener<Void>() {
                     @Override
@@ -125,14 +127,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupFences() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
-        AwarenessFence locationFence = LocationFence.exiting(10.730806d, 77.5299917, 100f);
 
-        // Register the fence to receive callbacks.
-        Awareness.getFenceClient(this).updateFences(new FenceUpdateRequest.Builder()
-                .addFence(FENCE_KEY, locationFence, mPendingIntent)
+        AwarenessFence movingFence = DetectedActivityFence.during(DetectedActivity.IN_VEHICLE, DetectedActivity.ON_BICYCLE, DetectedActivity.ON_FOOT, DetectedActivity.RUNNING, DetectedActivity.WALKING);
+        AwarenessFence idleFence = DetectedActivityFence.during(DetectedActivity.STILL);
+
+        Awareness.getFenceClient(getApplicationContext()).updateFences(new FenceUpdateRequest.Builder()
+                .addFence(MOVIING_FENCE_KEY, movingFence, mPendingIntent)
+                .addFence(IDLE_FENCE_KEY, idleFence, mPendingIntent)
                 .build())
                 .addOnSuccessListener(new OnSuccessListener<Void>() {
                     @Override
@@ -146,6 +147,41 @@ public class MainActivity extends AppCompatActivity {
                         Log.e(TAG, "Fence could not be registered: " + e);
                     }
                 });
+
+        /*Awareness.getSnapshotClient(this).getLocation().addOnSuccessListener(new OnSuccessListener<LocationResponse>() {
+            @Override
+            public void onSuccess(LocationResponse locationResponse) {
+                if (locationResponse != null) {
+                    Location location = locationResponse.getLocation();
+                    if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                        return;
+                    }
+                    AwarenessFence locationFence = LocationFence.exiting(location.getLatitude(), location.getLongitude(), 50);
+
+                    AwarenessFence headPhoneFence = HeadphoneFence.during(HeadphoneState.PLUGGED_IN);
+
+
+                    // Register the fence to receive callbacks.
+                    Awareness.getFenceClient(getApplicationContext()).updateFences(new FenceUpdateRequest.Builder()
+                            .addFence(FENCE_KEY, locationFence, mPendingIntent)
+                            .addFence("headphoneFenceKey", headPhoneFence, mPendingIntent)
+                            .build())
+                            .addOnSuccessListener(new OnSuccessListener<Void>() {
+                                @Override
+                                public void onSuccess(Void aVoid) {
+                                    Log.i(TAG, "Fence was successfully registered.");
+                                }
+                            })
+                            .addOnFailureListener(new OnFailureListener() {
+                                @Override
+                                public void onFailure(@NonNull Exception e) {
+                                    Log.e(TAG, "Fence could not be registered: " + e);
+                                }
+                            });
+
+                }
+            }
+        });*/
     }
 
 
@@ -161,15 +197,15 @@ public class MainActivity extends AppCompatActivity {
 
             // The state information for the given fence is em
             FenceState fenceState = FenceState.extract(intent);
+            String fenceStateStr = "";
+            if (TextUtils.equals(fenceState.getFenceKey(), MOVIING_FENCE_KEY)) {
 
-            if (TextUtils.equals(fenceState.getFenceKey(), FENCE_KEY)) {
-                String fenceStateStr;
                 switch (fenceState.getCurrentState()) {
                     case FenceState.TRUE:
-                        fenceStateStr = "Exiting";
+                        fenceStateStr = "Moving";
                         break;
                     case FenceState.FALSE:
-                        fenceStateStr = "Entering";
+                        fenceStateStr = "Not Moving";
                         break;
                     case FenceState.UNKNOWN:
                         fenceStateStr = "unknown";
@@ -177,14 +213,29 @@ public class MainActivity extends AppCompatActivity {
                     default:
                         fenceStateStr = "unknown value";
                 }
-                Toast.makeText(context, "Fence state: " + fenceStateStr, Toast.LENGTH_LONG).show();
-                showLocation(context);
             }
+
+            if (TextUtils.equals(fenceState.getFenceKey(), IDLE_FENCE_KEY)) {
+                switch (fenceState.getCurrentState()) {
+                    case FenceState.TRUE:
+                        fenceStateStr = "Idle";
+                        break;
+                    case FenceState.FALSE:
+                        fenceStateStr = "Not Idle";
+                        break;
+                    case FenceState.UNKNOWN:
+                        fenceStateStr = "unknown";
+                        break;
+                    default:
+                        fenceStateStr = "unknown value";
+                }
+            }
+            Toast.makeText(context, "Fence state: " + fenceStateStr, Toast.LENGTH_LONG).show();
         }
     }
 
-    private void showLocation(final Context context) {
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+   /* private void showLocation(final Context context) {
+        if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return;
         }
         Awareness.getSnapshotClient(context).getLocation().addOnSuccessListener(new OnSuccessListener<LocationResponse>() {
@@ -192,11 +243,11 @@ public class MainActivity extends AppCompatActivity {
             public void onSuccess(LocationResponse locationResponse) {
                 if (locationResponse != null) {
                     Location location = locationResponse.getLocation();
-                    Toast.makeText(context, "Latitude:"+location.getLatitude()+", Longitude:"+location.getLongitude(), Toast.LENGTH_SHORT).show();
+                    Toast.makeText(context, "Latitude:"+location.getLatitude()+", Longitude:"+location.getLongitude()+", Accuracy:"+location.getAccuracy()+", Provider:"+location.getProvider(), Toast.LENGTH_SHORT).show();
                 }
             }
         });
-    }
+    }*/
 }
 
 
